@@ -1,5 +1,7 @@
 from machine  import ADC, Pin
-from utime import sleep
+from utime import sleep, localtime, time
+
+import uos
 
 #CONFIG LEDS
 ledpower_red = Pin(1, Pin.OUT)
@@ -19,21 +21,23 @@ pressure = ADC(2)
 btn_power = Pin(17, Pin.IN, Pin.PULL_DOWN)
 btn_turbo = Pin(22, Pin.IN, Pin.PULL_DOWN)
 
-#RELays
+#BIP
 buzzer = Pin(0, Pin.OUT)
+
+#RELays
 engine_left = Pin(21, Pin.OUT)
 engine_right = Pin(20, Pin.OUT)
 bomb_water = Pin(19, Pin.OUT)
 solenoid = Pin(18, Pin.OUT)
 
 
-
-
 def standby():
+    log('MODO STANDBY - ESPERANDO APERTAR BOTAO POWER')
+    ledpower_green.value(0)
     ledpower_red.value(1)
     while btn_power.value() == 0:
         sleep(0.1)
-        print(pressure.read_u16())
+        log('VALOR DO SENSOR DE PRESSAO: '+str(pressure.read_u16()))
     ledpower_red.value(0)
     ledpower_green.value(1)
     changePrograms()
@@ -44,28 +48,53 @@ def changePrograms():
 
     if program >= 1 and program <= 3:
         if program == 1:
-            print('LAVAGEM LEVE')
+            leds('wash')
+            log('LAVAGEM LEVE')
             waterLevel()
             wash(4)
+            leds('enxague')
+            enxague()
+            leds('centrifugation')
+            centrifugation()
+            shutdown()
         if program == 2:
-            print('LAVAGEM MODERADA')
+            leds('wash')
+            log('LAVAGEM MODERADA')
             waterLevel(level)
             wash(8)
+            leds('enxague')
+            enxague()
+            leds('centrifugation')
+            centrifugation()
+            shutdown()
         if program == 3:
-            print('LAVAGEM PESADA')
+            leds('wash')
+            log('LAVAGEM PESADA')
             waterLevel(level)
             wash(12)
+            leds('enxague')
+            enxague()
+            leds('centrifugation')
+            centrifugation()
+            shutdown()
     elif program == 4:
+        leds('enxague')
+        log('ENXAGUE')
         enxague()
-    elif program ==5:
-        print('MODO CENTRIFUGAÇÃO')
+        leds('centrifugation')
+        centrifugation()
+        shutdown()
+    elif program == 5:
+        log('CENTRIFUGAÇÃO')
+        leds('centrifugation')
+        centrifugation()
+        shutdown()
 
 def wash(cycles):
-    leds('wash')
+    level, program = setPrograms()
     for i in range(cycles):   
         for x in range(cycles+cycles):
             for c in range(5):
-                print(c)
                 engine_left.value(1)
                 if btn_turbo.value() == 1:
                     seconds = 0.4
@@ -78,79 +107,61 @@ def wash(cycles):
                 sleep(seconds)
                 engine_right.value(0)
             #VERIFICAR BOTAO POWER SE E TRUE
-            waterLevel()
-            print('PAUSA MOLHO')
-            sleep(10)
+                programChanged(level, program)
+            log('PAUSA MOLHO')
+            sleep(10) #definir 30s
 
 def waterLevel(level=2):
 
-    pressurevalue = pressure.read_u16()
-    
-    #LEVEL 1 WATER
+    def fill(pressurevalue, top):
+        solenoid.value(1)
+        while pressurevalue < top:
+            sleep(0.5)
+            pressurevalue = pressure.read_u16()
+            log(f'ENCHENDO => {pressurevalue.read_u16()}')
+        solenoid.value(0)
+                
+    def clear(pressurevalue, top):
+            if pressurevalue - top > 2000:
+                bomb_water.value(1)
+                while pressurevalue > top:
+                    log('DESCARTANDO ÁGUA')
+                    sleep(0.5)
+                    pressurevalue = pressure.read_u16()
+                    print(pressurevalue)
+                bomb_water.value(0)
+    #LEVEL 1 WATER 16328
     if level == 1:
-        if pressurevalue < 16384:
-            print('ENCHENDO PARA LEVEL 1')
-            solenoid.value(1)
-            while pressurevalue < 16384:
-                sleep(0.5)
-                pressurevalue = pressure.read_u16()
-                print(pressurevalue)
-            solenoid.value(0)
-        elif pressurevalue > 16384:
-            if pressurevalue - 16384 > 2000:
-                bomb_water.value(1)
-                while pressurevalue > 16384:
-                    print('ESVAZIANDO PARA LEVEL 1')
-                    sleep(0.5)
-                    pressurevalue = pressure.read_u16()
-                    print(pressurevalue)
-                bomb_water.value(0)
-    #LEVEL 2 WATER
+        pressurevalue = pressure.read_u16()
+        log(f'SENSOR DE PRESSÃO DE AR {pressurevalue} lvl1')
+        if pressurevalue < 16328:
+            fill(pressurevalue, 16328)
+        elif pressurevalue > 16328:
+            clear(pressurevalue, 16328)
+    #LEVEL 2 WATER 32768
     elif level == 2:
+        pressurevalue = pressure.read_u16()
+        log(f'SENSOR DE PRESSÃO DE AR {pressurevalue} lvl2')
         if pressurevalue < 32768:
-            print('ENCHENDO PARA LEVEL 2')
-            solenoid.value(1)
-            while pressurevalue < 32768:
-                sleep(0.5)
-                pressurevalue = pressure.read_u16()
-                print(pressurevalue)
-            solenoid.value(0)
+            fill(pressurevalue, 32768)
         elif pressurevalue > 32768:
-            if pressurevalue - 32768 > 2000:
-                bomb_water.value(1)
-                print('ESVAZIANDO PARA LEVEL 2')
-                while pressurevalue > 32768:
-                    sleep(0.5)
-                    pressurevalue = pressure.read_u16()
-                    print(pressurevalue)
-                bomb_water.value(0)
-    #LEVEL 3 WATER
+            clear(pressurevalue, 32768)
+    #LEVEL 3 WATER 49151
     elif level == 3:
+        pressurevalue = pressure.read_u16()
+        log(f'SENSOR DE PRESSÃO DE AR {pressurevalue} lvl3')
         if pressurevalue < 49151:
-            print('ENCHENDO PARA LEVEL ')
-            solenoid.value(1)
-            while pressurevalue < 49151:
-                sleep(0.5)
-                pressurevalue = pressure.read_u16()
-                print(pressurevalue)
-            solenoid.value(0)
+            fill(pressurevalue, 49151)
         elif pressurevalue > 49151:
-            if pressurevalue - 49151 > 2000:
-                bomb_water.value(1)
-                while pressurevalue > 49151:
-                    print('ESVAZIANDO PARA LEVEL 3')
-                    sleep(0.5)
-                    pressurevalue = pressure.read_u16()
-                bomb_water.value(0)
+            clear(pressurevalue, 49151)
+    #LEVEL 4 WATER 65535
     elif level == 4:
+        pressurevalue = pressure.read_u16()
+        log(f'SENSOR DE PRESSÃO DE AR {pressurevalue} lvl4')
         if pressurevalue < 65535:
-            print('ENCHENDO PARA LEVEL 4')
-            solenoid.value(1)
-            while pressurevalue < 65535:
-                sleep(0.5)
-                pressurevalue = pressure.read_u16()
-                print(pressurevalue)
-            solenoid.value(0)
+            fill(pressure, 65535)
+        elif pressurevalue > 65535:
+            clear(pressurevalue, 16328)
 
 def setPrograms():
 
@@ -181,23 +192,135 @@ def setPrograms():
     return level, program  
 
 def enxague():
-    while True:
-        print('ENXAGUANDO')
-        sleep(0.5)
-
+    bomb_water.value(1)
+    while pressure.read_u16() > 0:
+        log('RETIRANDO ÁGUA')
+        sleep(.2)
+    log('')
+    sleep(1) #definir 60 segundos
+    for e in range(4):
+        engine_right.value(1)
+        sleep(5)
+        engine_right.value(0)
+        sleep(5)
+    rpm = 5
+    for r in range(4):
+        print(f'Contagem: {r} ')
+        engine_right.value(1)
+        sleep(rpm)
+        engine_right.value(0)
+        sleep(1)
+        rpm = rpm+5
+    engine_right.value(1)
+    sleep(30)
+    bomb_water.value(0)
+    for i in range(2):   
+        for x in range(4):
+            for c in range(5):
+                print(c)
+                engine_left.value(1)
+                if btn_turbo.value() == 1:
+                    seconds = 0.4
+                else:
+                    seconds = 0.7
+                sleep(seconds)
+                engine_left.value(0)
+                sleep(0.05)
+                engine_right.value(1)
+                sleep(seconds)
+                engine_right.value(0)
+                waterLevel()
+            #VERIFICAR BOTAO POWER SE E TRUE
+            log('PAUSA MOLHO')
+            sleep(10)
+    
+    
+        
 def centrifugation():
-    pass
+    leds('centrifugation')
+    log('MODO CENTRIFUGAÇÃO')
+    bomb_water.value(1)
+    log('BOMBA DE VACUO LIGADA')
+    while pressure.read_u16() > 0:
+        sleep(1) #definir 5 em produção
+        log(f'CENTRIFUGAÇÃO => SENSOR DE PRESSÃO {pressure.read_u16()}')
+    for i in range(5):
+        log(f'{i} - LIGA MOTOR DIREITA')
+        engine_right.value(1)
+        sleep(5)
+        engine_right.value(0)
+        log(f'{i} - DESLIGA MOTOR DIREITA')
+        sleep(5)
+    for i in range(4):
+        engine_right.value(1)
+        sleep(60)
+        engine_right.value(0)
+        sleep(30)
+    engine_right.value(1)
+    sleep(120)
+    engine_right.value(0)
+    
 
-def leds(power):
+def leds(power=''):
     led_wash.value(0)
     led_enxague.value(0)
     led_centrifugation.value(0)
     if power == 'wash':
         led_wash.value(1)
-    if power == 'enxague':
+    elif power == 'enxague':
         led_enxague.value(1)
-    if power == 'centrifugation':
+    elif power == 'centrifugation':
         led_centrifugation.value(1)
+    else:
+        pass
+
+def shutdown():
+    leds()
+    buzzer.value(1)
+    sleep(.25)
+    buzzer.value(0)
+    sleep(.25)
+    buzzer.value(1)
+    sleep(.25)
+    buzzer.value(0)
+    sleep(.25)
+    buzzer.value(1)
+    sleep(1)
+    buzzer.value(0)
+    while btn_power.value() == 0:
+        ledpower_green.value(1)
+        sleep(.25)
+        ledpower_green.value(0)
+        sleep(.25)
+        log('ESPERANDO DESLIGAR BOTAO')
+    ledpower_green.value(0)
+    sleep(1)
+    standby()
+
+def programChanged(level, program):
+    levelbefore, programbefore = level , program
+    level_now , program_now = setPrograms()
+    if programbefore != program_now:
+        programbefore = program_now
+        log('FUNÇÃO ALTERADA, REPROGRAMANDO.')
+        changePrograms()
+        shutdown()
+    if levelbefore != level_now:
+        levelbefore = level_now
+        log('NIVEL DE AGUA ALTERADO, AJUSTANDO.')
+        waterLevel()
+
+def log(msg):
+    times = localtime(time())
+    timenow = f"{times[2]}/{times[1]}/{times[0]} as {times[3]}:{times[4]}:{times[5]} => "
+    msg = timenow +msg
+    with open('/log.txt', 'a') as f:
+        f.write(msg + '\n')
+    print(msg) # opcional: também exibir o log no console
+
+
+    
+log('============================================================================')           
 standby()
 
 
